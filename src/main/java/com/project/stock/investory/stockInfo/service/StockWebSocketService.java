@@ -104,20 +104,8 @@ public class StockWebSocketService {
         // SSE(Server-Sent Events): 서버에서 클라이언트로 실시간 데이터를 보내는 기술
         SseEmitter emitter = new SseEmitter(TimeUnit.MINUTES.toMillis(30));
 
-        // 📝 해당 주식의 구독자 리스트에 새 연결 추가
-        // computeIfAbsent: 키가 없으면 새 리스트를 생성하고, 있으면 기존 리스트 반환
-        emitters.computeIfAbsent(stockId, k -> new CopyOnWriteArrayList<>()).add(emitter);
-        log.info("[{}] SSE 연결 +1 (총 {}개)", stockId, emitters.get(stockId).size());
-
-        // 🎯 ④ KIS 구독 관리 - 이 주식을 처음으로 구독하는지 확인
-        if (subscribed.add(stockId)) {  // Set.add()는 새로 추가되면 true, 이미 있으면 false 반환
-            log.info("[{}] ▶️  KIS subscribe", stockId);
-            // 첫 구독이므로 KIS에 실제 구독 요청 전송
-            // Lambda 표현식: 데이터를 받으면 fanOut 메서드로 모든 구독자에게 전달
-            kisClient.queueSubscribe(stockId, dto -> fanOut(stockId, dto));
-        } else {
-            log.debug("[{}] 이미 subscribe 중", stockId);
-        }
+        // 🔐 ④ 등록 + KIS 구독 판단 (종목별 락 안)
+        register(stockId, emitter);
 
         // 🔌 ⑤ 연결 종료 상황에 대한 콜백 함수들 등록
 
@@ -134,6 +122,36 @@ public class StockWebSocketService {
         sendEvent(emitter, "message", "connected");
 
         return emitter;  // 설정이 완료된 SSE 연결 반환
+    }
+
+    /**
+     * 🔐 구독자 등록 + KIS 최초 구독 판단을 종목별 락 안에서 처리
+     * 해지 경로(removeEmitterOnly)와 같은 락을 쓰므로,
+     * "마지막 구독자 해지" 도중에 새 구독자가 끼어들어 삭제될 리스트에 등록되는 경합이 없음
+     *
+     * 장 운영 시간·종목 존재 확인과 분리해 두어 동시성 테스트에서 직접 호출할 수 있음 (package-private)
+     */
+    void register(String stockId, SseEmitter emitter) {
+        ReentrantLock lock = lockOf(stockId);
+        lock.lock();
+        try {
+            // 📝 해당 주식의 구독자 리스트에 새 연결 추가
+            CopyOnWriteArrayList<SseEmitter> list =
+                    emitters.computeIfAbsent(stockId, k -> new CopyOnWriteArrayList<>());
+            list.add(emitter);
+            log.info("[{}] SSE 연결 +1 (총 {}개)", stockId, list.size());
+
+            // 🎯 KIS 구독 관리 - 이 주식을 처음으로 구독하는지 확인
+            if (subscribed.add(stockId)) {  // Set.add()는 새로 추가되면 true, 이미 있으면 false 반환
+                log.info("[{}] ▶️  KIS subscribe", stockId);
+                // 첫 구독이므로 KIS에 실제 구독 요청 전송
+                kisClient.queueSubscribe(stockId, dto -> fanOut(stockId, dto));
+            } else {
+                log.debug("[{}] 이미 subscribe 중", stockId);
+            }
+        } finally {
+            lock.unlock();
+        }
     }
 
     /**
@@ -206,31 +224,36 @@ public class StockWebSocketService {
      * @param stockId 주식 코드
      * @param emitter 제거할 SSE 연결
      */
-    private void removeEmitterOnly(String stockId, SseEmitter emitter) {
+    void removeEmitterOnly(String stockId, SseEmitter emitter) {
         // 🔐 동시성 제어: 같은 주식에 대한 작업이 겹치지 않도록 락 획득
-        ReentrantLock lock = locks.computeIfAbsent(stockId, k -> new ReentrantLock());
+        ReentrantLock lock = lockOf(stockId);
         lock.lock();
         try {
             // 📝 해당 주식의 구독자 리스트에서 연결 제거
             List<SseEmitter> list = emitters.get(stockId);
-            if (list != null) {
-                list.remove(emitter);
+            if (list == null || !list.remove(emitter)) {
+                return;  // 이미 제거된 연결 (timeout·completion·error 콜백 중복 호출)
+            }
 
-                // 🧹 마지막 구독자가 떠나면 자원 정리
-                if (list.isEmpty()) {
-                    emitters.remove(stockId);  // 빈 리스트 제거
-
-                    // KIS 구독도 해지 (더 이상 데이터가 필요 없음)
-                    if (subscribed.remove(stockId)) {
-                        log.info("[{}] ⏹️  마지막 구독자 종료 → KIS unsubscribe", stockId);
-                        kisClient.queueUnsubscribe(stockId);
-                    }
+            // 🧹 0명 확인 → KIS 해지 → 목록 삭제 (구독 경로와 같은 락 안)
+            if (list.isEmpty()) {
+                if (subscribed.remove(stockId)) {
+                    log.info("[{}] ⏹️  마지막 구독자 종료 → KIS unsubscribe", stockId);
+                    kisClient.queueUnsubscribe(stockId);
                 }
+                emitters.remove(stockId);
             }
         } finally {
             lock.unlock();  // 반드시 락 해제
         }
         // ⚠️ 여기서는 emitter.complete() 호출하지 않음 → 예외 방지
+    }
+
+    /**
+     * 🔐 종목별 락 조회 (없으면 생성). 다른 종목끼리는 서로 기다리지 않음.
+     */
+    ReentrantLock lockOf(String stockId) {
+        return locks.computeIfAbsent(stockId, k -> new ReentrantLock());
     }
 
     /**
