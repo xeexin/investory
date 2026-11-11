@@ -1,0 +1,15 @@
+run=1 2026-11-11T12:06:42+0900 [RESULT] scenario=fanOut runs=1000 failedRuns=0 totalExceptions=0 sizeMismatchRuns=0 avgFanOutsPerRun=63
+run=1 2026-11-11T12:06:42+0900 [RESULT] scenario=independence runs=1000 failedRuns=0 aNotBlockedRuns=1000 maxBMicros=669
+run=1 2026-11-11T12:06:42+0900 [RESULT] scenario=lastLeaveVsJoin runs=1000 failedRuns=40 missingNewSubscriber=6 externalMismatch=34 exceptionRuns=1
+run=2 2026-11-11T12:06:47+0900 [RESULT] scenario=fanOut runs=1000 failedRuns=0 totalExceptions=0 sizeMismatchRuns=0 avgFanOutsPerRun=70
+run=2 2026-11-11T12:06:47+0900 [RESULT] scenario=independence runs=1000 failedRuns=0 aNotBlockedRuns=1000 maxBMicros=302
+run=2 2026-11-11T12:06:47+0900 [RESULT] scenario=lastLeaveVsJoin runs=1000 failedRuns=12 missingNewSubscriber=3 externalMismatch=9 exceptionRuns=0
+run=3 2026-11-11T12:06:52+0900 [RESULT] scenario=fanOut runs=1000 failedRuns=0 totalExceptions=0 sizeMismatchRuns=0 avgFanOutsPerRun=71
+run=3 2026-11-11T12:06:52+0900 [RESULT] scenario=independence runs=1000 failedRuns=0 aNotBlockedRuns=1000 maxBMicros=239
+run=3 2026-11-11T12:06:52+0900 [RESULT] scenario=lastLeaveVsJoin runs=1000 failedRuns=6 missingNewSubscriber=3 externalMismatch=3 exceptionRuns=0
+run=4 2026-11-11T12:06:56+0900 [RESULT] scenario=fanOut runs=1000 failedRuns=0 totalExceptions=0 sizeMismatchRuns=0 avgFanOutsPerRun=66
+run=4 2026-11-11T12:06:56+0900 [RESULT] scenario=independence runs=1000 failedRuns=0 aNotBlockedRuns=1000 maxBMicros=234
+run=4 2026-11-11T12:06:56+0900 [RESULT] scenario=lastLeaveVsJoin runs=1000 failedRuns=7 missingNewSubscriber=4 externalMismatch=3 exceptionRuns=2
+run=5 2026-11-11T12:07:04+0900 [RESULT] scenario=fanOut runs=1000 failedRuns=0 totalExceptions=0 sizeMismatchRuns=0 avgFanOutsPerRun=67
+run=5 2026-11-11T12:07:04+0900 [RESULT] scenario=independence runs=1000 failedRuns=0 aNotBlockedRuns=1000 maxBMicros=1182
+run=5 2026-11-11T12:07:04+0900 [RESULT] scenario=lastLeaveVsJoin runs=1000 failedRuns=107 missingNewSubscriber=23 externalMismatch=84 exceptionRuns=12
