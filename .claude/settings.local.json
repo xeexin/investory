@@ -1,9 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(git ls-tree *)",
-      "Bash(git -C /Users/heejin/Documents/IntelliJ/investory show origin/refactor/sse-webSocket-minhee:src/main/java/com/project/stock/investory/stockInfo/websocket/KisWebSocketClient.java)",
-      "Bash(git *)"
-    ]
-  }
-}

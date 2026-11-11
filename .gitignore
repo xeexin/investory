@@ -38,3 +38,5 @@ out/
 
 ### application.properties ###
 application.properties
+### Claude Code (local settings)
+.claude/settings.local.json

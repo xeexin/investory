@@ -10,35 +10,10 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 /**
- * 📡 SSE(Server-Sent Events) 실시간 스트리밍 컨트롤러
+ * 실시간 주가 SSE 스트리밍 컨트롤러.
  *
- * ===================================================================
- * 🏆 자소서 핵심 어필 포인트: WebSocket + SSE 하이브리드 아키텍처
- * ===================================================================
- *
- * 💡 이 컨트롤러의 핵심 역할:
- * 🔄 KIS WebSocket API → 내부 SSE 스트리밍 → 웹 클라이언트
- *
- * 1️⃣ 【기술적 복잡도】프로토콜 변환 계층
- *    ✅ 외부: WebSocket (KIS API 제약)
- *    ✅ 내부: SSE (웹 클라이언트 최적화)
- *    ✅ 중간: 실시간 데이터 파이프라인 구축
- *
- * 2️⃣ 【실무 적용성】사용자 경험 최적화
- *    ✅ 자동 재연결: EventSource API 내장 기능 활용
- *    ✅ 이벤트 기반: trade, connected 등 의미있는 이벤트 분리
- *    ✅ 실시간 UI: 브라우저 네이티브 SSE 지원
- *
- * 3️⃣ 【아키텍처 설계】계층 분리와 책임 분산
- *    ✅ Controller: HTTP 요청/응답, SSE 연결 관리
- *    ✅ Service: WebSocket 구독, 데이터 변환
- *    ✅ Client: KIS API 연동, 재연결 로직
- *
- * 📊 구현 특징:
- * - MediaType.TEXT_EVENT_STREAM_VALUE로 SSE 응답 타입 명시
- * - SseEmitter 30분 타임아웃으로 메모리 누수 방지
- * - JavaScript EventSource API와 완벽 호환
- * - 실시간 주가 데이터 JSON 직렬화 및 전송
+ * <p>KIS WebSocket으로 받은 체결 데이터를 {@link StockWebSocketService}가 종목별로 팬아웃하고,
+ * 이 컨트롤러는 클라이언트에게 SSE 연결({@code text/event-stream})을 열어 준다.
  */
 @RestController
 @RequestMapping("/stock")
@@ -50,33 +25,11 @@ public class StockStreamController {
     private final StockWebSocketService service;
 
     /**
-     * 📈 실시간 주식 가격 스트리밍 엔드포인트 - 하이브리드 아키텍처의 핵심!
-     *
-     * ===================================================================
-     * 🏆 자소서 어필 포인트: 1:N 팬아웃 최적화 + 프로토콜 변환
-     * ===================================================================
-     *
-     * 🔍 이 메서드가 하는 일:
-     * 1. HTTP 요청을 받아서 SSE 스트림 연결로 업그레이드
-     * 2. 백그라운드에서 WebSocket 구독 시작 (내부적으로)
-     * 3. 실시간 데이터가 오면 SSE 이벤트로 변환해서 전송
-     *
-     * 🎯 기술적 복잡도:
-     * - HTTP → SSE 프로토콜 변환
-     * - MediaType.TEXT_EVENT_STREAM_VALUE 헤더 설정
-     * - 장시간 연결 유지를 위한 Keep-Alive 설정
-     *
-     * 🚀 성능 최적화:
-     * - 동일 종목 중복 구독 방지 (서비스 레이어에서 처리)
-     * - 메모리 효율적 SseEmitter 관리
-     * - 자동 타임아웃으로 좀비 연결 방지
+     * 종목의 실시간 체결가 SSE 스트림을 연다.
+     * 같은 종목의 첫 구독자일 때만 KIS 구독 요청이 나간다 (서비스 레이어에서 처리).
      *
      * @param stockId 종목코드 (예: "005930" = 삼성전자)
-     * @return SseEmitter 실시간 스트림 연결 객체
-     *
-     * 🔄 전체 데이터 플로우:
-     * 클라이언트 → HTTP 요청 → 이 메서드 → Service → WebSocket Client → KIS API
-     *            ←── SSE 스트림 ←── Service ←── 실시간 데이터 ←── KIS API
+     * @return 실시간 체결 이벤트를 전송하는 SseEmitter (30분 타임아웃)
      */
     @GetMapping(value = "/{stockId}/realTimeprice", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public ResponseEntity<SseEmitter> getStockPrice(@PathVariable String stockId) {
