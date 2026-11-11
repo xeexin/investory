@@ -78,9 +78,12 @@ public class KisWebSocketClient {
     private final ReentrantLock sendLock = new ReentrantLock();         // 메시지 전송용
 
     /**
-     * 📋 현재 KIS 서버에 실제로 구독 요청을 보낸 종목들
+     * 📋 KIS 서버에 구독되어 있어야 하는 종목들 (desired state)
      * 중복 구독을 방지하기 위해 사용
      * 예: 삼성전자(005930)를 100명이 구독해도 KIS에는 1번만 요청
+     *
+     * 전송 실패와 무관하게 리스너가 있는 동안은 유지되며,
+     * 재연결(onOpen) 시 이 집합 전체를 다시 구독해 KIS 상태를 맞춘다.
      */
     private final Set<String> subscribed = ConcurrentHashMap.newKeySet();
 
@@ -358,20 +361,46 @@ public class KisWebSocketClient {
      * @param stockId 구독할 종목코드
      */
     private void sendSubscribe(String stockId) {
+        boolean failed = false;
         sendLock.lock();  // 메시지 전송 동시성 제어
         try {
-            if (!isSessionOpen()) return;  // 연결이 끊어져 있으면 종료
+            // 연결이 끊어져 있으면 종료 – subscribed 에 남아 있으므로 onOpen 에서 재구독된다
+            if (!isSessionOpen()) return;
 
             // 🚀 실제 구독 패킷 전송 (JSON 형태)
             session.getBasicRemote().sendText(buildPayload("1", stockId));
             log.info("▶️ subscribe : {}", stockId);
 
         } catch (Exception e) {
-            log.error("subscribe 전송 오류 – {}", stockId, e);
-            subscribed.remove(stockId);  // 실패 시 구독 목록에서 제거
+            // subscribed 에서 제거하지 않는다: 제거하면 서비스 쪽 구독 상태와 어긋나
+            // 이후 구독자가 와도 다시 요청되지 않는다. 대신 연결을 재수립해 onOpen 에서 복구한다.
+            log.error("subscribe 전송 오류 – {} (재연결 후 재구독 예정)", stockId, e);
+            failed = true;
         } finally {
             sendLock.unlock();
         }
+        if (failed) {
+            forceReconnect();
+        }
+    }
+
+    /**
+     * 🔁 전송 실패 시 현재 세션을 닫고 재연결을 시작한다.
+     * sendText 실패는 대부분 연결 이상이므로, 세션을 새로 맺고 onOpen 에서
+     * subscribed 전체를 다시 구독해 KIS 측 상태를 원하는 상태로 되돌린다.
+     */
+    private void forceReconnect() {
+        if (shuttingDown) return;
+        try {
+            Session s = this.session;
+            if (s != null && s.isOpen()) {
+                s.close(new CloseReason(
+                        CloseReason.CloseCodes.UNEXPECTED_CONDITION, "send failure"));
+            }
+        } catch (Exception e) {
+            log.debug("세션 종료 중 오류 (무시): {}", e.toString());
+        }
+        triggerReconnect();  // onClose 가 호출되지 않는 경우 대비 (중복 호출은 CAS 로 무시됨)
     }
 
     /**
@@ -473,8 +502,15 @@ public class KisWebSocketClient {
         this.session = s;
 
         // 🔄 재연결 시 기존 구독 복원
-        // 연결이 끊어졌다가 다시 연결되면 이전에 구독했던 종목들을 자동으로 다시 구독
-        subscribed.forEach(this::sendSubscribe);
+        // 콜백 스레드에서 직접 보내면 sendExecutor 의 subscribe/unsubscribe 와 순서가 뒤섞일 수 있으므로
+        // 같은 단일 스레드 executor 에 넣는다. subscribed 스냅샷은 실행 시점에 읽으므로
+        // 앞서 큐에 들어간 unsubscribe 는 이미 반영되어 있고, 뒤에 들어온 요청은 재구독 이후에 전송된다.
+        if (shuttingDown) return;
+        try {
+            sendExecutor.execute(() -> subscribed.forEach(this::sendSubscribe));
+        } catch (RejectedExecutionException e) {
+            log.debug("sendExecutor 종료됨 – 재구독 생략");
+        }
     }
 
     /**
