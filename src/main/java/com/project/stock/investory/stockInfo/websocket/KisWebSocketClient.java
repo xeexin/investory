@@ -197,6 +197,22 @@ public class KisWebSocketClient {
      */
     private final AtomicBoolean reconnecting = new AtomicBoolean(false);
 
+    /**
+     * 🛑 애플리케이션 종료 중 표시 (종료 시 onClose → 재연결이 일어나지 않도록)
+     */
+    private volatile boolean shuttingDown = false;
+
+    /**
+     * 📤 구독/해지 패킷 전송 전용 단일 스레드
+     * 공용 풀에서 병렬 실행하면 "구독 → 해지 → 재구독"이 뒤바뀌어 전송될 수 있으므로,
+     * 요청된 순서 그대로 KIS에 전달되도록 한 줄로 세움
+     */
+    private final ExecutorService sendExecutor = Executors.newSingleThreadExecutor(r -> {
+        Thread t = new Thread(r, "kis-ws-sender");
+        t.setDaemon(true);
+        return t;
+    });
+
     /* ------------------------------------------------------------------ */
     /* 🔄 생명주기 관리 - Spring이 자동으로 호출                            */
     /* ------------------------------------------------------------------ */
@@ -216,6 +232,8 @@ public class KisWebSocketClient {
      */
     @PreDestroy
     public void destroy() {
+        shuttingDown = true;         // 이후 onClose가 재연결을 시작하지 않도록
+        sendExecutor.shutdownNow();  // 대기 중인 전송 작업 중단
         connectionLock.lock();  // 연결 작업 락 획득
         try {
             if (session != null && session.isOpen()) {
@@ -352,56 +370,72 @@ public class KisWebSocketClient {
     private void asyncConnect() {
         // 🚀 별도 스레드에서 연결 작업 실행 (메인 스레드 블로킹 방지)
         CompletableFuture.runAsync(() -> {
-            connectionLock.lock();  // 🔒 동시에 여러 연결 시도하는 것 방지
-            try {
-                // 📡 1단계: WebSocket 연결 도구 준비
-                WebSocketContainer container = ContainerProvider.getWebSocketContainer();
-                container.setDefaultMaxSessionIdleTimeout(60_000);  // 60초간 응답 없으면 타임아웃
-
-                // 🔗 2단계: 실제 KIS 서버에 연결 시도
-                // this = 현재 클래스 (연결 성공 시 onOpen(), 메시지 수신 시 onMessage() 등 호출)
-                this.session = container.connectToServer(this, URI.create(wsUrl));
-                log.info("🎉 KIS WebSocket 연결 성공! {}", wsUrl);
-
-            } catch (Exception e) {
-                // 💥 연결 실패 (네트워크 문제, 서버 다운 등)
-                log.error("❌ WebSocket 연결 실패 - 재연결 시도합니다", e);
-                triggerReconnect();  // 자동 재연결 로직 실행
-            } finally {
-                connectionLock.unlock();  // 🔓 반드시 락 해제 (데드락 방지)
+            if (!connectOnce()) {
+                triggerReconnect();  // 💥 실패 시 백오프 재연결 시작
             }
         });
     }
 
     /**
+     * 🔗 KIS 서버에 1회 동기 연결 시도
+     * 재연결 루프가 "성공/실패"를 직접 확인할 수 있도록 결과를 boolean으로 반환
+     *
+     * @return 연결 성공(또는 이미 연결됨) 여부
+     */
+    private boolean connectOnce() {
+        connectionLock.lock();  // 🔒 동시에 여러 연결 시도하는 것 방지
+        try {
+            if (isSessionOpen()) return true;  // 다른 스레드가 이미 연결함
+
+            // 📡 1단계: WebSocket 연결 도구 준비
+            WebSocketContainer container = ContainerProvider.getWebSocketContainer();
+            container.setDefaultMaxSessionIdleTimeout(60_000);  // 60초간 응답 없으면 타임아웃
+
+            // 🔗 2단계: 실제 KIS 서버에 연결 (성공 시 onOpen()에서 구독 복원)
+            this.session = container.connectToServer(this, URI.create(wsUrl));
+            log.info("🎉 KIS WebSocket 연결 성공! {}", wsUrl);
+            return true;
+
+        } catch (Exception e) {
+            // 💥 연결 실패 (네트워크 문제, 서버 다운 등)
+            log.warn("❌ WebSocket 연결 실패: {}", e.getMessage());
+            return false;
+        } finally {
+            connectionLock.unlock();  // 🔓 반드시 락 해제 (데드락 방지)
+        }
+    }
+
+    /**
      * 🔄 재연결 로직: 연결이 끊어졌을 때 자동으로 재시도
      *
-     * 🎯 백오프(Backoff) 전략:
+     * 🎯 선형 백오프(Linear Backoff) 전략:
      * - 1차: 2초 대기 후 재시도
      * - 2차: 4초 대기 후 재시도
      * - 3차: 6초 대기 후 재시도
-     * - 최대 5번까지 시도
+     * - 최대 5번까지 시도 (각 시도의 성공 여부를 확인한 뒤 다음 단계로 진행)
      */
     private void triggerReconnect() {
+        if (shuttingDown) return;  // 종료 중에는 재연결하지 않음
+
         // 🚫 이미 재연결 중이면 중복 실행 방지
         if (!reconnecting.compareAndSet(false, true)) return;
 
         CompletableFuture.runAsync(() -> {
-            // 🔄 최대 재연결 횟수까지 반복 시도
-            for (int i = 1; i <= MAX_RECONNECT; i++) {
-                try {
-                    // ⏰ 점진적 대기 시간 증가 (백오프)
-                    Thread.sleep(RECONNECT_BACKOFF_MS * i);
-                    log.info("🔄 재연결 시도 {}/{}", i, MAX_RECONNECT);
+            try {
+                for (int i = 1; i <= MAX_RECONNECT && !shuttingDown; i++) {
+                    long waitMs = RECONNECT_BACKOFF_MS * i;  // ⏰ 2초 → 4초 → 6초 → ...
+                    log.info("🔄 재연결 시도 {}/{} – {}ms 대기", i, MAX_RECONNECT, waitMs);
+                    Thread.sleep(waitMs);
 
-                    asyncConnect();  // 재연결 시도
-                    return;  // 성공하면 루프 종료
-
-                } catch (InterruptedException ignored) {
-                    // 스레드 인터럽트는 무시
+                    if (connectOnce()) {
+                        log.info("✅ 재연결 성공 ({}회차)", i);
+                        return;
+                    }
                 }
+                log.error("❌ WebSocket 재연결 {}회 실패 – 더 이상 시도하지 않음", MAX_RECONNECT);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
             }
-            log.error("❌ WebSocket 재연결 실패 – 더 이상 시도하지 않음");
         }).whenComplete((v, t) -> reconnecting.set(false));  // 재연결 플래그 해제
     }
 
@@ -478,7 +512,7 @@ public class KisWebSocketClient {
                 }
             }
             task.run();  // 실제 작업 실행
-        });
+        }, sendExecutor);  // 전용 단일 스레드 → 요청 순서 보장
     }
 
     /**
