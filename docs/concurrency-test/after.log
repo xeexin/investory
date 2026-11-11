@@ -1,0 +1,15 @@
+run=1 2026-11-11T12:07:10+0900 [RESULT] scenario=fanOut runs=1000 failedRuns=0 totalExceptions=0 sizeMismatchRuns=0 avgFanOutsPerRun=65
+run=1 2026-11-11T12:07:10+0900 [RESULT] scenario=independence runs=1000 failedRuns=0 aNotBlockedRuns=0 maxBMicros=332
+run=1 2026-11-11T12:07:10+0900 [RESULT] scenario=lastLeaveVsJoin runs=1000 failedRuns=0 missingNewSubscriber=0 externalMismatch=0 exceptionRuns=0
+run=2 2026-11-11T12:07:19+0900 [RESULT] scenario=fanOut runs=1000 failedRuns=0 totalExceptions=0 sizeMismatchRuns=0 avgFanOutsPerRun=66
+run=2 2026-11-11T12:07:19+0900 [RESULT] scenario=independence runs=1000 failedRuns=0 aNotBlockedRuns=0 maxBMicros=287
+run=2 2026-11-11T12:07:19+0900 [RESULT] scenario=lastLeaveVsJoin runs=1000 failedRuns=0 missingNewSubscriber=0 externalMismatch=0 exceptionRuns=0
+run=3 2026-11-11T12:07:24+0900 [RESULT] scenario=fanOut runs=1000 failedRuns=0 totalExceptions=0 sizeMismatchRuns=0 avgFanOutsPerRun=73
+run=3 2026-11-11T12:07:24+0900 [RESULT] scenario=independence runs=1000 failedRuns=0 aNotBlockedRuns=0 maxBMicros=304
+run=3 2026-11-11T12:07:24+0900 [RESULT] scenario=lastLeaveVsJoin runs=1000 failedRuns=0 missingNewSubscriber=0 externalMismatch=0 exceptionRuns=0
+run=4 2026-11-11T12:07:28+0900 [RESULT] scenario=fanOut runs=1000 failedRuns=0 totalExceptions=0 sizeMismatchRuns=0 avgFanOutsPerRun=65
+run=4 2026-11-11T12:07:28+0900 [RESULT] scenario=independence runs=1000 failedRuns=0 aNotBlockedRuns=0 maxBMicros=397
+run=4 2026-11-11T12:07:28+0900 [RESULT] scenario=lastLeaveVsJoin runs=1000 failedRuns=0 missingNewSubscriber=0 externalMismatch=0 exceptionRuns=0
+run=5 2026-11-11T12:07:34+0900 [RESULT] scenario=fanOut runs=1000 failedRuns=0 totalExceptions=0 sizeMismatchRuns=0 avgFanOutsPerRun=64
+run=5 2026-11-11T12:07:34+0900 [RESULT] scenario=independence runs=1000 failedRuns=0 aNotBlockedRuns=0 maxBMicros=1710
+run=5 2026-11-11T12:07:34+0900 [RESULT] scenario=lastLeaveVsJoin runs=1000 failedRuns=0 missingNewSubscriber=0 externalMismatch=0 exceptionRuns=0

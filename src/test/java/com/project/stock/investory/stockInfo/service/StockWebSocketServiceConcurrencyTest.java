@@ -20,6 +20,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -164,6 +165,7 @@ class StockWebSocketServiceConcurrencyTest {
         int failedRuns = 0;
         int missingNewSubscriber = 0;   // 새 구독자가 목록에 없음
         int externalMismatch = 0;       // 외부(KIS) 구독 상태 ≠ 목록 상태
+        int exceptionRuns = 0;          // 퇴장·입장 스레드 중 예외가 난 회차
 
         for (int run = 0; run < REPEAT; run++) {
             Set<String> external = ConcurrentHashMap.newKeySet();
@@ -189,8 +191,15 @@ class StockWebSocketServiceConcurrencyTest {
 
             ready.await();
             start.countDown();
-            leave.get(5, TimeUnit.SECONDS);
-            join.get(5, TimeUnit.SECONDS);
+            // 경합 중 예외(예: 등록 직후 목록이 지워져 NPE)도 실패 회차로 센다 — 중단하지 않고 집계를 끝까지 낸다
+            boolean threw = false;
+            for (Future<?> f : List.of(leave, join)) {
+                try {
+                    f.get(5, TimeUnit.SECONDS);
+                } catch (ExecutionException e) {
+                    threw = true;
+                }
+            }
 
             List<SseEmitter> list = emitters(service).get(STOCK);
             boolean listHasSubscribers = list != null && !list.isEmpty();
@@ -198,13 +207,14 @@ class StockWebSocketServiceConcurrencyTest {
             boolean consistent = external.contains(STOCK) == listHasSubscribers
                     && subscribed(service).contains(STOCK) == external.contains(STOCK);
 
+            if (threw) exceptionRuns++;
             if (!newcomerPresent) missingNewSubscriber++;
             if (!consistent) externalMismatch++;
-            if (!newcomerPresent || !consistent) failedRuns++;
+            if (threw || !newcomerPresent || !consistent) failedRuns++;
         }
 
-        System.out.printf("[RESULT] scenario=lastLeaveVsJoin runs=%d failedRuns=%d missingNewSubscriber=%d externalMismatch=%d%n",
-                REPEAT, failedRuns, missingNewSubscriber, externalMismatch);
+        System.out.printf("[RESULT] scenario=lastLeaveVsJoin runs=%d failedRuns=%d missingNewSubscriber=%d externalMismatch=%d exceptionRuns=%d%n",
+                REPEAT, failedRuns, missingNewSubscriber, externalMismatch, exceptionRuns);
 
         assertEquals(0, failedRuns, "새 구독자 누락 또는 외부 구독 상태 불일치가 발생한 회차 수");
     }
