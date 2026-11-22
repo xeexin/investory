@@ -2,6 +2,7 @@ package com.project.stock.investory.stockInfo.controller;
 
 import com.project.stock.investory.stockInfo.service.StockWebSocketService;
 import lombok.RequiredArgsConstructor;
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -32,7 +33,7 @@ public class StockStreamController {
      * @return 실시간 체결 이벤트를 전송하는 SseEmitter (30분 타임아웃)
      */
     @GetMapping(value = "/{stockId}/realTimeprice", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public ResponseEntity<SseEmitter> getStockPrice(@PathVariable String stockId) {
+    public ResponseEntity<SseEmitter> getStockPrice(@PathVariable String stockId, HttpServletRequest request) {
 
         log.info("📊 [{}] 실시간 스트림 요청 - SSE 연결 시작", stockId);
 
@@ -40,7 +41,11 @@ public class StockStreamController {
         // 1. SseEmitter 생성 (30분 타임아웃)
         // 2. WebSocket 구독 요청 (중복 방지 로직 포함)
         // 3. 실시간 데이터 → SSE 이벤트 변환 콜백 등록
-        SseEmitter emitter = service.getStockPriceStream(stockId);
+        // 🛡️ 연결 수 제한 기준: 접속 IP.
+        // 이 경로는 비로그인 공개(EventSource 는 Authorization 헤더를 못 보냄)라 사용자 ID 를 쓸 수 없다.
+        // X-Forwarded-For 는 클라이언트가 임의로 넣을 수 있어 그대로 믿으면 제한을 우회당한다.
+        // 프록시 뒤에 배포할 때는 신뢰하는 프록시만 반영하도록 server.forward-headers-strategy 를 설정할 것.
+        SseEmitter emitter = service.getStockPriceStream(stockId, request.getRemoteAddr());
 
         // 🌐 SSE 응답 헤더 설정 - 브라우저 호환성 최적화
         return ResponseEntity.ok()
